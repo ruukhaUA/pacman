@@ -139,31 +139,6 @@ class MinimaxAgent(MultiAgentSearchAgent):
         """
         "*** YOUR CODE HERE ***"
 
-        best_score = float("-inf")
-        best_action = Directions.STOP
-
-        for action in gameState.getLegalActions(0):
-            score = self.value(gameState.generateSuccessor(0, action), 1, 0)
-            if score > best_score:
-                best_score = score
-                best_action = action
-
-        return best_action
-    
-    def value(self, state, agent, depth):
-        if state.isWin() or state.isLose() or depth == self.depth:
-            return self.evaluationFunction(state)
-
-        actions = state.getLegalActions(agent)
-        if not actions:
-            return self.evaluationFunction(state)
-
-        next_agent = (agent + 1) % state.getNumAgents()
-        next_depth = depth + 1 if next_agent == 0 else depth
-
-        scores = [self.value(state.generateSuccessor(agent, action), next_agent, next_depth) for action in actions]
-        return max(scores) if agent == 0 else min(scores)
-
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
     Your minimax agent with alpha-beta pruning (question 3)
