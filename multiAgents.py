@@ -328,11 +328,11 @@ def betterEvaluationFunction(currentGameState: GameState):
         else:
             # Si no está asustado, evitarlo
             if ghost_distance <= 1:
-                score -= 500
+                score -= 100
             elif ghost_distance <= 2:
-                score -= 200
+                score -= 500
             else:
-                score -= 2.0 / ghost_distance
+                score -= 5.0 / ghost_distance
 
     # Factor 3: Cantidad de comida en cada dirección
     direction_vectors = {
@@ -387,7 +387,7 @@ def betterEvaluationFunction(currentGameState: GameState):
 
         score -= lonely_food * 3
 
-    # Factor 4: acabar la comida restante
+    # Factor 6: acabar la comida restante
     if food and len(food) <= 10:
         closest_food = min(manhattanDistance(pacman_pos, f) for f in food)
         score += 300.0 / (closest_food + 1)
@@ -547,10 +547,7 @@ class NeuralAgent(Agent):
                 if ghost_distance <= 2:
                     score -= 200  # Gran penalización por estar demasiado cerca
 
-        # Factor 3: Cantidad de comida en esa dirección
-        walls = state.getWalls()
-        x, y = pacman_pos
-
+        # Factor 3: Cantidad de comida en cada dirección
         direction_vectors = {
             Directions.NORTH: (0, 1),
             Directions.SOUTH: (0, -1),
@@ -558,6 +555,11 @@ class NeuralAgent(Agent):
             Directions.WEST: (-1, 0)
         }
 
+        legal_actions = state.getLegalActions(0)
+
+        walls = state.getWalls()
+        pacman_pos = state.getPacmanPosition()
+        x, y = pacman_pos
         for action, (dx, dy) in direction_vectors.items():
             if action in legal_actions:
                 food_in_direction = 0
@@ -570,8 +572,7 @@ class NeuralAgent(Agent):
                     next_x += dx
                     next_y += dy
 
-                action_index = list(self.idx_to_action.values()).index(action)
-                score += probabilities[action_index] * food_in_direction * 5
+                score += food_in_direction * 3
 
         # Factor 4: Número de paredes adyacentes
         adjacent_walls = 0
@@ -581,14 +582,39 @@ class NeuralAgent(Agent):
             if walls[next_x][next_y]:
                 adjacent_walls += 1
 
-        score -= adjacent_walls * 10
-        
+        score -= adjacent_walls * 5
+
+        # Factor 5: Distancia a la comida solitaria
+        if food:
+            lonely_food = 0
+
+            for food_pos in food:
+                nearby_food = 0
+
+                for other_food in food:
+                    if food_pos != other_food:
+                        dist_between_food = manhattanDistance(food_pos, other_food)
+                        if dist_between_food <= 3:
+                            nearby_food += 1
+
+                if nearby_food <= 1:
+                    dist_from_pacman = manhattanDistance(pacman_pos, food_pos)
+                    lonely_food += dist_from_pacman 
+
+            score -= lonely_food * 3
+
+        # Factor 6: acabar la comida restante
+        if food and len(food) <= 10:
+            closest_food = min(manhattanDistance(pacman_pos, f) for f in food)
+            score += 300.0 / (closest_food + 1)
+            score -= 30.0 * len(food)
+            
         # Combinar la puntuación de la red con la heurística
         neural_score = 0
         for i, action in enumerate(self.idx_to_action.values()):
             if action in legal_actions:
                 neural_score += probabilities[i] * 100
-        
+            
         return score + neural_score
 
     def getAction(self, state):
@@ -638,7 +664,11 @@ class NeuralAgent(Agent):
         successors = []
         for action in legal_actions:
             successor = state.generateSuccessor(0, action)
+            new_food_count = len(successor.getFood().asList())
+
             eval_score = self.evaluationFunction(successor)
+            if new_food_count < len(state.getFood().asList()):
+                eval_score += 500
             neural_score = 0
             for a, p in action_probs:
                 if a == action:
@@ -668,12 +698,12 @@ def createNeuralAgent(model_path="models/pacman_model.pth"):
     return NeuralAgent(model_path)
 
 class AlphaBetaNeuralAgent(AlphaBetaAgent):
-    def __init__(self, depth='2', model_path="models/pacman_model.pth", decay = 0.01, reverse_decay = False):
+    def __init__(self, depth='3', model_path="models/pacman_model.pth", reverse_decay = False):
         super().__init__('scoreEvaluationFunction', depth)
         self.model = createNeuralAgent(model_path)
-        self.decay = float(decay)
         self.reverse_decay = bool(reverse_decay)
         self.initial_food_count = None
+        self.recent_positions = []
 
         self.evaluationFunction = self.evaluation_combined
 
@@ -693,12 +723,12 @@ class AlphaBetaNeuralAgent(AlphaBetaAgent):
             probabilities = torch.nn.functional.softmax(output, dim=1).cpu().numpy()[0]
 
         legal_actions = state.getLegalActions()
-        neural_score = 0
+        best_prob = 0
         for i, action in enumerate(self.model.idx_to_action.values()):
             if action in legal_actions:
-                neural_score += probabilities[i] * 100
+                best_prob = max(best_prob, probabilities[i])
 
-        return neural_score
+        return best_prob * 1000
 
     def evaluation_combined(self, state):
         food = state.getFood().asList()
@@ -709,8 +739,10 @@ class AlphaBetaNeuralAgent(AlphaBetaAgent):
 
         food_ratio = len(food) / self.initial_food_count
 
-        w_neural = food_ratio
+        w_neural = 0.5 * food_ratio
         w_heuristic = 1 - w_neural
+
+        print(f"w_neural: {w_neural:.2f}, w_heuristic: {w_heuristic:.2f}")
 
         # 1) Traditional score (with the new heuristics from Task 1)
         trad_score = betterEvaluationFunction(state)
@@ -720,3 +752,62 @@ class AlphaBetaNeuralAgent(AlphaBetaAgent):
         
         # 3) Weighted combination
         return w_heuristic * trad_score + w_neural * neural_score
+    
+    def getAction(self, gameState: GameState):
+        best_score = float("-inf")
+        best_action = Directions.STOP
+        alpha = float("-inf")
+        beta = float("inf")
+        current_direction = gameState.getPacmanState().configuration.direction
+        current_food_count = len(gameState.getFood().asList())
+
+        pacman_pos = gameState.getPacmanPosition()
+        ghost_states = gameState.getGhostStates()
+
+        try:
+            nearest_ghost_dist = min(manhattanDistance(pacman_pos, ghost.getPosition()) for ghost in ghost_states if ghost.scaredTimer == 0)
+        except ValueError:
+            nearest_ghost_dist = float("inf")
+        
+        for action in gameState.getLegalActions(0):
+            successor = gameState.generateSuccessor(0, action)
+            score = self.value(successor, 1, 0, alpha, beta)
+
+            successor_pos = successor.getPacmanPosition()
+            new_food_count = len(successor.getFood().asList())
+
+            for ghost in successor.getGhostStates():
+                if ghost.scaredTimer == 0:
+                    ghost_dist = manhattanDistance(successor_pos, ghost.getPosition())
+
+                    if ghost_dist <= 1:
+                        score -= 10000
+                    elif ghost_dist == 2:
+                        score -= 1000
+
+            if new_food_count < current_food_count:
+                score += 500
+
+            if action == Directions.STOP:
+                score -= 1000
+
+            if nearest_ghost_dist > 3:
+                if action == Directions.REVERSE[current_direction]:
+                    score -= 25
+
+                if successor_pos in self.recent_positions:
+                    score -= 100
+
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+            alpha = max(alpha, best_score)
+
+        chosen_successor = gameState.generateSuccessor(0, best_action)
+        self.recent_positions.append(chosen_successor.getPacmanPosition())
+
+        if len(self.recent_positions) > 3:
+            self.recent_positions.pop(0)
+
+        return best_action
