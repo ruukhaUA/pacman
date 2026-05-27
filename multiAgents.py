@@ -77,7 +77,6 @@ class ReflexAgent(Agent):
         newGhostStates = successorGameState.getGhostStates()
         newScaredTimes = [ghostState.scaredTimer for ghostState in newGhostStates]
 
-        "*** YOUR CODE HERE ***"
         return successorGameState.getScore()
 
 def scoreEvaluationFunction(currentGameState: GameState):
@@ -139,25 +138,122 @@ class MinimaxAgent(MultiAgentSearchAgent):
         Returns whether or not the game state is a losing state
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+
+        best_score = float("-inf")
+        best_action = Directions.STOP
+
+        for action in gameState.getLegalActions(0):
+            score = self.value(gameState.generateSuccessor(0, action), 1, 0)
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+        return best_action
+    
+    def value(self, state, agent, depth):
+        if state.isWin() or state.isLose() or depth == self.depth:
+            return self.evaluationFunction(state)
+
+        actions = state.getLegalActions(agent)
+        if not actions:
+            return self.evaluationFunction(state)
+
+        next_agent = (agent + 1) % state.getNumAgents()
+        next_depth = depth + 1 if next_agent == 0 else depth
+
+        scores = [self.value(state.generateSuccessor(agent, action), next_agent, next_depth) for action in actions]
+        return max(scores) if agent == 0 else min(scores)
 
 class AlphaBetaAgent(MultiAgentSearchAgent):
     """
     Your minimax agent with alpha-beta pruning (question 3)
     """
 
+    def value(self, state, agent, depth, alpha, beta):
+        if state.isWin() or state.isLose() or depth == self.depth:
+            return self.evaluationFunction(state)
+
+        actions = state.getLegalActions(agent)
+        if not actions:
+            return self.evaluationFunction(state)
+
+        next_agent = (agent + 1) % state.getNumAgents()
+        next_depth = depth + 1 if next_agent == 0 else depth
+
+        if agent == 0:
+            best_score = float("-inf")
+            for action in actions:
+                successor = state.generateSuccessor(agent, action)
+                best_score = max(best_score, self.value(successor, next_agent, next_depth, alpha, beta))
+                if best_score > beta:
+                    return best_score
+                alpha = max(alpha, best_score)
+            return best_score
+        else:
+            best_score = float("inf")
+            for action in actions:
+                successor = state.generateSuccessor(agent, action)
+                best_score = min(best_score, self.value(successor, next_agent, next_depth, alpha, beta))
+                if best_score < alpha:
+                    return best_score
+                beta = min(beta, best_score)
+            return best_score
+        
     def getAction(self, gameState: GameState):
         """
         Returns the minimax action using self.depth and self.evaluationFunction
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+
+        best_score = float("-inf")
+        best_action = Directions.STOP
+        alpha = float("-inf")
+        beta = float("inf")
+        current_direction = gameState.getPacmanState().configuration.direction
+
+        for action in gameState.getLegalActions(0):
+            score = self.value(gameState.generateSuccessor(0, action), 1, 0, alpha, beta)
+
+            if action == Directions.STOP:
+                score -= 1000
+
+            if action == Directions.REVERSE[current_direction]:
+                score -= 50
+
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+            alpha = max(alpha, best_score)
+
+        return best_action
 
 class ExpectimaxAgent(MultiAgentSearchAgent):
     """
       Your expectimax agent (question 4)
     """
 
+    def value(self, state, agent, depth):
+        if state.isWin() or state.isLose() or depth == self.depth:
+            return self.evaluationFunction(state)
+
+        actions = state.getLegalActions(agent)
+        if not actions:
+            return self.evaluationFunction(state)
+
+        next_agent = (agent + 1) % state.getNumAgents()
+        next_depth = depth + 1 if next_agent == 0 else depth
+
+        scores = [
+            self.value(state.generateSuccessor(agent, action), next_agent, next_depth)
+            for action in actions
+        ]
+
+        if agent == 0:
+            return max(scores)
+        else:
+            return sum(scores) / len(scores)
+        
     def getAction(self, gameState: GameState):
         """
         Returns the expectimax action using self.depth and self.evaluationFunction
@@ -166,7 +262,17 @@ class ExpectimaxAgent(MultiAgentSearchAgent):
         legal moves.
         """
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+
+        best_score = float("-inf")
+        best_action = Directions.STOP
+
+        for action in gameState.getLegalActions(0):
+            score = self.value(gameState.generateSuccessor(0, action), 1, 0)
+            if score > best_score:
+                best_score = score
+                best_action = action
+
+        return best_action
 
 def betterEvaluationFunction(currentGameState: GameState):
     """
@@ -176,7 +282,118 @@ def betterEvaluationFunction(currentGameState: GameState):
     DESCRIPTION: <write something here so we know what you did>
     """
     "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+    if currentGameState.isWin():
+        return float("inf")
+    if currentGameState.isLose():
+        return float("-inf")
+
+    score = currentGameState.getScore()
+
+    pacman_pos = currentGameState.getPacmanPosition()
+    food = currentGameState.getFood().asList()
+    ghost_states = currentGameState.getGhostStates()
+    capsules = currentGameState.getCapsules()
+    walls = currentGameState.getWalls()
+
+    x, y = pacman_pos
+
+    # Factor 1: Distancia a la comida más cercana
+    if food:
+        min_food_distance = min(
+            manhattanDistance(pacman_pos, food_pos)
+            for food_pos in food
+        )
+        score += 10.0 / (min_food_distance + 1)
+
+        # Penalizar que quede mucha comida
+        score -= 10.0 * len(food)
+
+    # Factor extra: preferir cápsulas si todavía quedan
+    if capsules:
+        min_capsule_distance = min(
+            manhattanDistance(pacman_pos, capsule_pos)
+            for capsule_pos in capsules
+        )
+        score += 8.0 / (min_capsule_distance + 1)
+        score -= 15.0 * len(capsules)
+
+    # Factor 2: Proximidad a fantasmas
+    for ghost_state in ghost_states:
+        ghost_pos = ghost_state.getPosition()
+        ghost_distance = manhattanDistance(pacman_pos, ghost_pos)
+
+        if ghost_state.scaredTimer > 0:
+            # Si el fantasma está asustado, acercarse a él
+            score += 50.0 / (ghost_distance + 1)
+        else:
+            # Si no está asustado, evitarlo
+            if ghost_distance <= 1:
+                score -= 500
+            elif ghost_distance <= 2:
+                score -= 200
+            else:
+                score -= 2.0 / ghost_distance
+
+    # Factor 3: Cantidad de comida en cada dirección
+    direction_vectors = {
+        Directions.NORTH: (0, 1),
+        Directions.SOUTH: (0, -1),
+        Directions.EAST: (1, 0),
+        Directions.WEST: (-1, 0)
+    }
+
+    legal_actions = currentGameState.getLegalActions(0)
+
+    for action, (dx, dy) in direction_vectors.items():
+        if action in legal_actions:
+            food_in_direction = 0
+            next_x, next_y = x + dx, y + dy
+
+            while not walls[next_x][next_y]:
+                if (next_x, next_y) in food:
+                    food_in_direction += 1
+
+                next_x += dx
+                next_y += dy
+
+            score += food_in_direction * 3
+
+    # Factor 4: Número de paredes adyacentes
+    adjacent_walls = 0
+
+    for dx, dy in direction_vectors.values():
+        next_x, next_y = x + dx, y + dy
+        if walls[next_x][next_y]:
+            adjacent_walls += 1
+
+    score -= adjacent_walls * 5
+
+    # Factor 5: Distancia a la comida solitaria
+    if food:
+        lonely_food = 0
+
+        for food_pos in food:
+            nearby_food = 0
+
+            for other_food in food:
+                if food_pos != other_food:
+                    dist_between_food = manhattanDistance(food_pos, other_food)
+                    if dist_between_food <= 3:
+                        nearby_food += 1
+
+            if nearby_food <= 1:
+                dist_from_pacman = manhattanDistance(pacman_pos, food_pos)
+                lonely_food += dist_from_pacman 
+
+        score -= lonely_food * 3
+
+    # Factor 4: acabar la comida restante
+    if food and len(food) <= 10:
+        closest_food = min(manhattanDistance(pacman_pos, f) for f in food)
+        score += 300.0 / (closest_food + 1)
+        score -= 30.0 * len(food)
+
+    return score
 
 # Abbreviation
 better = betterEvaluationFunction
@@ -329,6 +546,42 @@ class NeuralAgent(Agent):
                 # Si no está asustado, evitarlo
                 if ghost_distance <= 2:
                     score -= 200  # Gran penalización por estar demasiado cerca
+
+        # Factor 3: Cantidad de comida en esa dirección
+        walls = state.getWalls()
+        x, y = pacman_pos
+
+        direction_vectors = {
+            Directions.NORTH: (0, 1),
+            Directions.SOUTH: (0, -1),
+            Directions.EAST: (1, 0),
+            Directions.WEST: (-1, 0)
+        }
+
+        for action, (dx, dy) in direction_vectors.items():
+            if action in legal_actions:
+                food_in_direction = 0
+                next_x, next_y = x + dx, y + dy
+
+                while not walls[next_x][next_y]:
+                    if (next_x, next_y) in food:
+                        food_in_direction += 1
+
+                    next_x += dx
+                    next_y += dy
+
+                action_index = list(self.idx_to_action.values()).index(action)
+                score += probabilities[action_index] * food_in_direction * 5
+
+        # Factor 4: Número de paredes adyacentes
+        adjacent_walls = 0
+
+        for dx, dy in direction_vectors.values():
+            next_x, next_y = x + dx, y + dy
+            if walls[next_x][next_y]:
+                adjacent_walls += 1
+
+        score -= adjacent_walls * 10
         
         # Combinar la puntuación de la red con la heurística
         neural_score = 0
@@ -413,3 +666,57 @@ def createNeuralAgent(model_path="models/pacman_model.pth"):
     Útil para integrarse con la estructura de pacman.py.
     """
     return NeuralAgent(model_path)
+
+class AlphaBetaNeuralAgent(AlphaBetaAgent):
+    def __init__(self, depth='2', model_path="models/pacman_model.pth", decay = 0.01, reverse_decay = False):
+        super().__init__('scoreEvaluationFunction', depth)
+        self.model = createNeuralAgent(model_path)
+        self.decay = float(decay)
+        self.reverse_decay = bool(reverse_decay)
+        self.initial_food_count = None
+
+        self.evaluationFunction = self.evaluation_combined
+
+    def neural_evaluation(self, state):
+        if self.model is None or self.model.model is None:
+            return 0  # Si no hay modelo, devolver 0
+        
+        # Convertir a matriz
+        state_matrix = self.model.state_to_matrix(state)
+        
+        # Convertir a tensor
+        state_tensor = torch.FloatTensor(state_matrix).unsqueeze(0).to(self.model.device)
+        
+        # Obtener predicciones
+        with torch.no_grad():
+            output = self.model.model(state_tensor)
+            probabilities = torch.nn.functional.softmax(output, dim=1).cpu().numpy()[0]
+
+        legal_actions = state.getLegalActions()
+        neural_score = 0
+        for i, action in enumerate(self.model.idx_to_action.values()):
+            if action in legal_actions:
+                neural_score += probabilities[i] * 100
+
+        return neural_score
+
+    def evaluation_combined(self, state):
+        food = state.getFood().asList()
+
+        # Save initial amount once
+        if self.initial_food_count is None:
+            self.initial_food_count = len(food)
+
+        food_ratio = len(food) / self.initial_food_count
+
+        w_neural = food_ratio
+        w_heuristic = 1 - w_neural
+
+        # 1) Traditional score (with the new heuristics from Task 1)
+        trad_score = betterEvaluationFunction(state)
+        
+        # 2) Neural network score
+        neural_score = self.neural_evaluation(state)
+        
+        # 3) Weighted combination
+        return w_heuristic * trad_score + w_neural * neural_score
